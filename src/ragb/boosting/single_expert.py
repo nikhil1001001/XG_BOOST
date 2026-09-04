@@ -43,7 +43,7 @@ DEFAULT_XGB_PARAMS = dict(
 )
 
 
-def _survival_weights(run_length_posterior: np.ndarray, distances: np.ndarray) -> np.ndarray:
+def survival_weights(run_length_posterior: np.ndarray, distances: np.ndarray) -> np.ndarray:
     """w_i = P(r_now >= d_i | x_1:now) for each instance at distance d_i (timesteps before "now").
 
     distances >= len(run_length_posterior) get weight 0: BOCPD's pruned posterior carries ~0 mass
@@ -112,7 +112,7 @@ def run_single_expert(
         posterior = detector.run_length_posterior
         instance_times = np.arange(chunk_start, chunk_end)
         distances = (chunk_end - 1) - instance_times
-        weights = _survival_weights(posterior, distances)
+        weights = survival_weights(posterior, distances)
         weight_stats.append((chunk_start, float(weights.min()), float(weights.mean()), float(weights.max())))
         logger.debug(
             "chunk[%d:%d]: weight min=%.4f mean=%.4f max=%.4f",

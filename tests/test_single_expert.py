@@ -1,6 +1,6 @@
 import numpy as np
 
-from ragb.boosting.single_expert import _survival_weights, run_single_expert
+from ragb.boosting.single_expert import survival_weights, run_single_expert
 from ragb.data.synthetic_generator import SyntheticRegimeGenerator, SyntheticStreamConfig
 
 _SMALL_CFG = SyntheticStreamConfig(n_samples=3000, n_features=5, n_eras=2, hazard_rate=1 / 400, min_run_length=200, seed=3)
@@ -13,7 +13,7 @@ def test_survival_weights_recent_instance_gets_near_full_weight():
     # (weight 0).
     posterior = np.zeros(60)
     posterior[50] = 1.0
-    weights = _survival_weights(posterior, distances=np.array([0, 2, 49, 50, 55]))
+    weights = survival_weights(posterior, distances=np.array([0, 2, 49, 50, 55]))
     assert weights[0] == 1.0
     assert weights[1] == 1.0
     assert weights[2] == 1.0
@@ -23,7 +23,7 @@ def test_survival_weights_recent_instance_gets_near_full_weight():
 
 def test_survival_weights_beyond_posterior_length_is_zero():
     posterior = np.array([0.5, 0.3, 0.2])
-    weights = _survival_weights(posterior, distances=np.array([0, 1, 2, 10, 100]))
+    weights = survival_weights(posterior, distances=np.array([0, 1, 2, 10, 100]))
     assert weights[3] == 0.0
     assert weights[4] == 0.0
 
@@ -33,7 +33,7 @@ def test_survival_weights_monotonically_non_increasing_with_distance():
     posterior = rng.random(30)
     posterior /= posterior.sum()
     distances = np.arange(30)
-    weights = _survival_weights(posterior, distances)
+    weights = survival_weights(posterior, distances)
     assert np.all(np.diff(weights) <= 1e-12)  # non-increasing (survival function property)
 
 

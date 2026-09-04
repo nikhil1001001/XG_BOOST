@@ -39,6 +39,10 @@
     "skip_single_expert": false,
     "single_expert_hazard_rate": 0.0004,
     "single_expert_chunk_size": 500,
-    "single_expert_boost_rounds_per_chunk": 20
+    "single_expert_boost_rounds_per_chunk": 20,
+    "skip_mixture": false,
+    "mixture_K": 3,
+    "mixture_spawn_threshold": 0.3,
+    "mixture_probation_window": 1000
   }
 }

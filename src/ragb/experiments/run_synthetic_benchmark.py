@@ -22,6 +22,7 @@ from ragb.baselines.periodic_retrain import run_periodic_retrain
 from ragb.baselines.static_xgb import run_static_xgb
 from ragb.bocpd.detector import run_bocpd_on_signal
 from ragb.bocpd.signals import binary_log_loss, rolling_mean
+from ragb.boosting.mixture import run_mixture
 from ragb.boosting.single_expert import run_single_expert
 from ragb.data.synthetic_generator import SyntheticRegimeGenerator, SyntheticStream, SyntheticStreamConfig
 from ragb.eval.metrics import detect_events_from_probability_trace, detection_lag_and_false_alarms
@@ -102,6 +103,37 @@ def run_bocpd_validation(
     return sweep_df
 
 
+def _rewrite_combined_tables(results: dict, combined_path: Path, summary_path: Path, seed: int) -> None:
+    """Rewrites the combined windowed-PR-AUC and summary tables from whichever methods have run so
+    far in `results`, so results/tables/phase1_baselines_* stays the one place all synthetic-benchmark
+    methods are compared (per this script's stated design), regardless of which phase last added a
+    method to the dict.
+    """
+    combined_rows = []
+    for method, res in results.items():
+        df = res["pr_auc_over_time"].copy()
+        df["method"] = method
+        combined_rows.append(df)
+    combined = pd.concat(combined_rows, ignore_index=True)
+    combined.to_csv(combined_path, index=False)
+    logger.info("Updated windowed PR-AUC table: %s (%d rows, methods=%s)", combined_path, len(combined), list(results.keys()))
+
+    summary_rows = []
+    for method, res in results.items():
+        meta = res["metadata"]
+        summary_rows.append({
+            "method": method,
+            "mean_pr_auc": res["pr_auc_over_time"]["pr_auc"].dropna().mean(),
+            "n_retrains": meta["n_retrains"],
+            "total_boosting_rounds": meta["total_boosting_rounds"],
+            "train_time_sec": meta["train_time_sec"],
+            "seed": seed,
+        })
+    summary_df = pd.DataFrame(summary_rows)
+    summary_df.to_csv(summary_path, index=False)
+    logger.info("Updated summary table: %s\n%s", summary_path, summary_df.to_string(index=False))
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Synthetic benchmark: Phase 1 baselines (static_xgb, periodic_retrain) "
@@ -137,6 +169,10 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--single-expert-chunk-size", type=int, default=500)
     p.add_argument("--single-expert-boost-rounds-per-chunk", type=int, default=20)
+    p.add_argument("--skip-mixture", action="store_true", help="skip Phase 4 mixture-of-experts run")
+    p.add_argument("--mixture-K", type=int, default=3)
+    p.add_argument("--mixture-spawn-threshold", type=float, default=0.3)
+    p.add_argument("--mixture-probation-window", type=int, default=1000)
     return p.parse_args()
 
 
@@ -180,32 +216,9 @@ def main() -> None:
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    combined_rows = []
-    for method, res in results.items():
-        df = res["pr_auc_over_time"].copy()
-        df["method"] = method
-        combined_rows.append(df)
-    combined = pd.concat(combined_rows, ignore_index=True)
     combined_path = output_dir / "phase1_baselines_pr_auc_over_time.csv"
-    combined.to_csv(combined_path, index=False)
-    logger.info("Wrote windowed PR-AUC table: %s (%d rows)", combined_path, len(combined))
-
-    summary_rows = []
-    for method, res in results.items():
-        meta = res["metadata"]
-        summary_rows.append({
-            "method": method,
-            "mean_pr_auc": res["pr_auc_over_time"]["pr_auc"].dropna().mean(),
-            "n_retrains": meta["n_retrains"],
-            "total_boosting_rounds": meta["total_boosting_rounds"],
-            "train_time_sec": meta["train_time_sec"],
-            "seed": args.seed,
-        })
-    summary_df = pd.DataFrame(summary_rows)
     summary_path = output_dir / "phase1_baselines_summary.csv"
-    summary_df.to_csv(summary_path, index=False)
-    logger.info("Wrote summary table: %s\n%s", summary_path, summary_df.to_string(index=False))
+    _rewrite_combined_tables(results, combined_path, summary_path, args.seed)
 
     breakpoints_path = output_dir / "phase1_ground_truth_breakpoints.json"
     with open(breakpoints_path, "w") as f:
@@ -277,35 +290,46 @@ def main() -> None:
         weight_stats_path, se_result["weight_stats"]["weight_mean"].mean(),
     )
 
-    # Rewrite the combined comparison tables (Phase 1 + Phase 3) now that single_expert exists,
-    # so results/tables/phase1_baselines_* stays the one place all synthetic-benchmark methods
-    # are compared, per this script's stated design (see module docstring).
-    combined_rows = []
-    for method, res in results.items():
-        df = res["pr_auc_over_time"].copy()
-        df["method"] = method
-        combined_rows.append(df)
-    combined = pd.concat(combined_rows, ignore_index=True)
-    combined.to_csv(combined_path, index=False)
-    logger.info("Updated windowed PR-AUC table (now includes single_expert): %s (%d rows)", combined_path, len(combined))
-
-    summary_rows = []
-    for method, res in results.items():
-        meta = res["metadata"]
-        summary_rows.append({
-            "method": method,
-            "mean_pr_auc": res["pr_auc_over_time"]["pr_auc"].dropna().mean(),
-            "n_retrains": meta["n_retrains"],
-            "total_boosting_rounds": meta["total_boosting_rounds"],
-            "train_time_sec": meta["train_time_sec"],
-            "seed": args.seed,
-        })
-    summary_df = pd.DataFrame(summary_rows)
-    summary_df.to_csv(summary_path, index=False)
-    logger.info("Updated summary table (now includes single_expert): %s\n%s", summary_path, summary_df.to_string(index=False))
+    _rewrite_combined_tables(results, combined_path, summary_path, args.seed)
 
     se_duration = time.time() - se_start
     logger.info("=== Phase 3 single-expert soft-weighted pipeline complete in %.2fs ===", se_duration)
+
+    if args.skip_mixture:
+        return
+
+    mix_log_path = setup_logging("phase4_mixture")
+    mix_start = time.time()
+    logger.info("=== Phase 4 mixture-of-experts pipeline starting ===")
+    logger.info("Log file: %s", mix_log_path)
+
+    mix_result = run_mixture(
+        stream.X, stream.y,
+        initial_train_frac=args.initial_train_frac,
+        chunk_size=args.single_expert_chunk_size,
+        hazard_rate=args.single_expert_hazard_rate,
+        boost_rounds_per_chunk=args.single_expert_boost_rounds_per_chunk,
+        K=args.mixture_K,
+        spawn_threshold=args.mixture_spawn_threshold,
+        probation_window=args.mixture_probation_window,
+        seed=args.seed,
+        window_size=args.window_size,
+    )
+    results["mixture"] = mix_result
+
+    spawn_log_path = output_dir / "phase4_mixture_spawn_log.csv"
+    mix_result["spawn_log"].to_csv(spawn_log_path, index=False)
+    logger.info(
+        "Wrote spawn log: %s (%d spawns: %d promoted, %d discarded, spurious_spawn_rate=%.3f)",
+        spawn_log_path, mix_result["metadata"]["n_spawns_total"],
+        mix_result["metadata"]["n_promoted"], mix_result["metadata"]["n_discarded"],
+        mix_result["metadata"]["spurious_spawn_rate"],
+    )
+
+    _rewrite_combined_tables(results, combined_path, summary_path, args.seed)
+
+    mix_duration = time.time() - mix_start
+    logger.info("=== Phase 4 mixture-of-experts pipeline complete in %.2fs ===", mix_duration)
 
 
 if __name__ == "__main__":
