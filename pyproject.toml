@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ragb"
+version = "0.1.0"
+description = "Regime-Adaptive Gradient Boosting: BOCPD-driven mixture of soft-weighted XGBoost experts for structural breaks in financial time series"
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = [
+    "xgboost>=2.0",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "scipy",
+    "matplotlib",
+    "tqdm",
+    "openml",
+    "river",
+    "huggingface_hub",
+    "datasets",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+kaggle = ["kaggle"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
