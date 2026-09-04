@@ -35,6 +35,10 @@
     "bocpd_break_window": 15,
     "bocpd_event_threshold": 0.3,
     "bocpd_max_lag": 300,
-    "skip_bocpd": false
+    "skip_bocpd": false,
+    "skip_single_expert": false,
+    "single_expert_hazard_rate": 0.0004,
+    "single_expert_chunk_size": 500,
+    "single_expert_boost_rounds_per_chunk": 20
   }
 }

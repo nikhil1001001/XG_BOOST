@@ -22,6 +22,7 @@ from ragb.baselines.periodic_retrain import run_periodic_retrain
 from ragb.baselines.static_xgb import run_static_xgb
 from ragb.bocpd.detector import run_bocpd_on_signal
 from ragb.bocpd.signals import binary_log_loss, rolling_mean
+from ragb.boosting.single_expert import run_single_expert
 from ragb.data.synthetic_generator import SyntheticRegimeGenerator, SyntheticStream, SyntheticStreamConfig
 from ragb.eval.metrics import detect_events_from_probability_trace, detection_lag_and_false_alarms
 from ragb.utils.logging_config import get_logger, setup_logging
@@ -126,6 +127,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bocpd-event-threshold", type=float, default=0.3)
     p.add_argument("--bocpd-max-lag", type=int, default=300)
     p.add_argument("--skip-bocpd", action="store_true", help="skip Phase 2 BOCPD validation, run Phase 1 baselines only")
+    p.add_argument("--skip-single-expert", action="store_true", help="skip Phase 3 single-expert run")
+    p.add_argument(
+        "--single-expert-hazard-rate", type=float, default=0.0004,
+        help="BOCPD hazard rate used by single_expert's soft-weighting. NOT the same tuning target as "
+             "Phase 2's detection sweep -- Phase 3 found 0.002 (Phase 2's detection-recall pick) causes "
+             "overly aggressive down-weighting when used for instance weights; a rate closer to the "
+             "generator's own true switch rate (1/1500 here) works better for weighting. See phase3 report.",
+    )
+    p.add_argument("--single-expert-chunk-size", type=int, default=500)
+    p.add_argument("--single-expert-boost-rounds-per-chunk", type=int, default=20)
     return p.parse_args()
 
 
@@ -240,6 +251,61 @@ def main() -> None:
 
     bocpd_duration = time.time() - bocpd_start
     logger.info("=== Phase 2 BOCPD hazard-rate sweep validation complete in %.2fs ===", bocpd_duration)
+
+    if args.skip_single_expert:
+        return
+
+    se_log_path = setup_logging("phase3_single_expert")
+    se_start = time.time()
+    logger.info("=== Phase 3 single-expert soft-weighted pipeline starting ===")
+    logger.info("Log file: %s", se_log_path)
+
+    se_result = run_single_expert(
+        stream.X, stream.y,
+        initial_train_frac=args.initial_train_frac,
+        chunk_size=args.single_expert_chunk_size,
+        hazard_rate=args.single_expert_hazard_rate,
+        boost_rounds_per_chunk=args.single_expert_boost_rounds_per_chunk,
+        seed=args.seed,
+        window_size=args.window_size,
+    )
+    results["single_expert"] = se_result
+    weight_stats_path = output_dir / "phase3_single_expert_weight_stats.csv"
+    se_result["weight_stats"].to_csv(weight_stats_path, index=False)
+    logger.info(
+        "Wrote weight-stats diagnostic table: %s (mean of per-chunk mean weight=%.4f)",
+        weight_stats_path, se_result["weight_stats"]["weight_mean"].mean(),
+    )
+
+    # Rewrite the combined comparison tables (Phase 1 + Phase 3) now that single_expert exists,
+    # so results/tables/phase1_baselines_* stays the one place all synthetic-benchmark methods
+    # are compared, per this script's stated design (see module docstring).
+    combined_rows = []
+    for method, res in results.items():
+        df = res["pr_auc_over_time"].copy()
+        df["method"] = method
+        combined_rows.append(df)
+    combined = pd.concat(combined_rows, ignore_index=True)
+    combined.to_csv(combined_path, index=False)
+    logger.info("Updated windowed PR-AUC table (now includes single_expert): %s (%d rows)", combined_path, len(combined))
+
+    summary_rows = []
+    for method, res in results.items():
+        meta = res["metadata"]
+        summary_rows.append({
+            "method": method,
+            "mean_pr_auc": res["pr_auc_over_time"]["pr_auc"].dropna().mean(),
+            "n_retrains": meta["n_retrains"],
+            "total_boosting_rounds": meta["total_boosting_rounds"],
+            "train_time_sec": meta["train_time_sec"],
+            "seed": args.seed,
+        })
+    summary_df = pd.DataFrame(summary_rows)
+    summary_df.to_csv(summary_path, index=False)
+    logger.info("Updated summary table (now includes single_expert): %s\n%s", summary_path, summary_df.to_string(index=False))
+
+    se_duration = time.time() - se_start
+    logger.info("=== Phase 3 single-expert soft-weighted pipeline complete in %.2fs ===", se_duration)
 
 
 if __name__ == "__main__":
