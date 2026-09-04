@@ -69,7 +69,15 @@ def run_single_expert(
     xgb_params: dict | None = None,
     seed: int = 42,
     window_size: int = 500,
+    hard_cutover: bool = False,
+    hard_cutover_threshold: float = 0.5,
 ) -> dict:
+    """`hard_cutover=True` (Phase 5's hard-vs-soft ablation) thresholds the continuous survival
+    weights to {0, 1} at `hard_cutover_threshold` instead of using them directly -- i.e. a brittle
+    hard split at the believed changepoint instead of Section 3's soft assignment. Everything else
+    (detector, chunking, warm-starting) is identical, isolating the soft-vs-hard weighting choice as
+    the only variable between the two.
+    """
     params = {**DEFAULT_XGB_PARAMS, **(xgb_params or {}), "seed": seed}
     n = len(X)
     split = int(n * initial_train_frac)
@@ -113,6 +121,8 @@ def run_single_expert(
         instance_times = np.arange(chunk_start, chunk_end)
         distances = (chunk_end - 1) - instance_times
         weights = survival_weights(posterior, distances)
+        if hard_cutover:
+            weights = (weights >= hard_cutover_threshold).astype(np.float64)
         weight_stats.append((chunk_start, float(weights.min()), float(weights.mean()), float(weights.max())))
         logger.debug(
             "chunk[%d:%d]: weight min=%.4f mean=%.4f max=%.4f",
@@ -148,6 +158,8 @@ def run_single_expert(
             "hazard_rate": hazard_rate,
             "smoothing_window": smoothing_window,
             "boost_rounds_per_chunk": boost_rounds_per_chunk,
+            "hard_cutover": hard_cutover,
+            "hard_cutover_threshold": hard_cutover_threshold if hard_cutover else None,
             "n_retrains": len(chunk_starts) + 1,  # initial fit + one warm-start update per chunk
             "total_boosting_rounds": total_rounds,
             "train_time_sec": total_train_time,

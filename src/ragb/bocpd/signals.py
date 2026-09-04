@@ -36,9 +36,44 @@ def rolling_mean(x: np.ndarray, window: int) -> np.ndarray:
     return out
 
 
-def feature_drift_kl_signal(*args, **kwargs):
-    """Sliding-window feature-distribution drift signal (KL divergence between a reference window and
-    a current window). Not yet implemented -- lands in Phase 5 when the residual-loss-vs-feature-drift
-    ablation is actually run (Section 5, Phase 5 ablations).
+def feature_drift_kl_signal(X, chunk_size: int, n_bins: int = 10, eps: float = 1e-6) -> np.ndarray:
+    """Chunk-over-chunk feature-distribution drift signal: for each chunk after the first, the mean
+    (over features) KL divergence between the current chunk's empirical distribution and the
+    immediately preceding chunk's, using fixed-width histograms binned from each feature's full-
+    stream range (so chunk-to-chunk histograms are directly comparable).
+
+    Unlike the residual-loss signal (naturally a per-instance quantity), a feature distribution is
+    inherently a window/batch-level property -- there's no single-instance notion of "distribution
+    drift". This signal is therefore one scalar PER CHUNK, not per row, and BOCPD consuming it runs
+    at chunk granularity (see Phase 5's ablation report for how this is used).
+
+    Returns an array of length `n_chunks = len(X) // chunk_size`, with signal[0] = 0.0 (no prior
+    chunk to compare against).
     """
-    raise NotImplementedError("feature_drift_kl_signal is implemented in Phase 5 (signal-choice ablation)")
+    import pandas as pd  # local import: signals.py otherwise has no pandas dependency
+
+    n_chunks = len(X) // chunk_size
+    if n_chunks < 2:
+        raise ValueError(f"Need at least 2 full chunks of size {chunk_size} to compute drift, got {n_chunks}")
+
+    bin_edges = {col: np.histogram_bin_edges(X[col].to_numpy(), bins=n_bins) for col in X.columns}
+
+    def chunk_histograms(chunk: "pd.DataFrame") -> list[np.ndarray]:
+        hists = []
+        for col in X.columns:
+            h, _ = np.histogram(chunk[col].to_numpy(), bins=bin_edges[col])
+            h = h.astype(np.float64) + eps
+            h /= h.sum()
+            hists.append(h)
+        return hists
+
+    signal = np.zeros(n_chunks, dtype=np.float64)
+    prev_hists = chunk_histograms(X.iloc[0:chunk_size])
+    for i in range(1, n_chunks):
+        chunk = X.iloc[i * chunk_size:(i + 1) * chunk_size]
+        hists = chunk_histograms(chunk)
+        kl_per_feature = [float(np.sum(p * np.log(p / q))) for p, q in zip(hists, prev_hists)]
+        signal[i] = float(np.mean(kl_per_feature))
+        prev_hists = hists
+
+    return signal

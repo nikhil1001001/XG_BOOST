@@ -1,0 +1,3 @@
+variant,mean_pr_auc,total_boosting_rounds,spurious_spawn_rate
+single_expert,0.3916256980591032,740,
+mixture,0.3757478214661276,1440,0.8

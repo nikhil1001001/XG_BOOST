@@ -1,0 +1,3 @@
+n_true_breaks,n_detected,n_missed,mean_lag,n_false_alarms,false_alarm_rate_per_1000,signal,granularity
+8,6,2,76.33333333333333,71,4.4375,residual_loss,row
+8,0,8,,0,0.0,feature_drift_kl,chunk
