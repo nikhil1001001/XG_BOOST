@@ -73,6 +73,15 @@
 All Section 0a steps (1 through 8, minus step 8's actual commit which follows this report) completed
 successfully. No blockers encountered. No fallback cascade needed at this stage.
 
+## GitHub remote (Section 14 step 2)
+Neither `gh` (not installed/on PATH) nor a `GITHUB_TOKEN`/`GH_TOKEN` env var is available in this
+environment. Per Section 14 step 2, this is not a reason to stop: all work proceeds locally with
+normal commits on `main`. **Action needed from the user before this reaches actual GitHub:** either
+run `gh auth login` then `gh repo create regime-adaptive-gradient-boosting --public --source=. --remote=origin --push`
+from this repo root, or provide a `GITHUB_TOKEN` env var, or push manually to a remote created via the
+GitHub web UI (`git remote add origin <url> && git push -u origin main`). All commits will keep
+accumulating locally in the meantime so nothing is lost.
+
 ## Log file
 No `logs/` entry for this stage — Section 12's logging config doesn't exist as runnable code yet
 (it's a docstring stub created in this phase's skeleton, implemented properly starting Phase 1 setup
