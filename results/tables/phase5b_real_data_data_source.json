@@ -1,0 +1,8 @@
+{
+  "source": "elliptic",
+  "n_rows": 46564,
+  "n_features": 166,
+  "fraud_rate": 0.09760759384932566,
+  "time_column": "time_step",
+  "n_unlabeled_dropped": 157205
+}
