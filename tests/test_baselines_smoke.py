@@ -1,6 +1,8 @@
 import numpy as np
 
+from ragb.baselines.adwin_online import run_adwin_online
 from ragb.baselines.periodic_retrain import run_periodic_retrain
+from ragb.baselines.sliding_window_retrain import run_sliding_window_retrain
 from ragb.baselines.static_xgb import run_static_xgb
 from ragb.data.synthetic_generator import SyntheticRegimeGenerator, SyntheticStreamConfig
 
@@ -30,6 +32,27 @@ def test_periodic_retrain_runs_without_error_and_produces_pr_auc():
     assert len(df) > 0
     assert df["pr_auc"].notna().any()
     assert result["metadata"]["n_retrains"] > 1
+
+
+def test_sliding_window_retrain_runs_without_error_and_produces_pr_auc():
+    stream = _small_stream()
+    result = run_sliding_window_retrain(
+        stream.X, stream.y, initial_train_frac=0.3, retrain_every=400, window_size_rows=1000, window_size=200, seed=1,
+    )
+    df = result["pr_auc_over_time"]
+    assert len(df) > 0
+    assert df["pr_auc"].notna().any()
+    assert result["metadata"]["n_retrains"] > 1
+
+
+def test_adwin_online_runs_without_error_and_produces_pr_auc():
+    stream = _small_stream()
+    result = run_adwin_online(stream.X, stream.y, initial_train_frac=0.3, window_size=200, seed=1)
+    df = result["pr_auc_over_time"]
+    assert len(df) > 0
+    assert df["pr_auc"].notna().any()
+    assert result["metadata"]["n_retrains"] >= 1
+    assert result["metadata"]["n_drifts_detected"] == len(result["drift_points"])
 
 
 def test_baselines_reproducible_given_same_seed():

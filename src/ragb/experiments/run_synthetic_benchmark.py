@@ -18,7 +18,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from ragb.baselines.adwin_online import run_adwin_online
 from ragb.baselines.periodic_retrain import run_periodic_retrain
+from ragb.baselines.sliding_window_retrain import run_sliding_window_retrain
 from ragb.baselines.static_xgb import run_static_xgb
 from ragb.bocpd.detector import run_bocpd_on_signal
 from ragb.bocpd.signals import binary_log_loss, rolling_mean
@@ -210,6 +212,19 @@ def main() -> None:
         stream.X, stream.y,
         initial_train_frac=args.initial_train_frac,
         retrain_every=args.retrain_every,
+        seed=args.seed,
+        window_size=args.window_size,
+    )
+    results["sliding_window_retrain"] = run_sliding_window_retrain(
+        stream.X, stream.y,
+        initial_train_frac=args.initial_train_frac,
+        retrain_every=args.retrain_every,
+        seed=args.seed,
+        window_size=args.window_size,
+    )
+    results["adwin_online"] = run_adwin_online(
+        stream.X, stream.y,
+        initial_train_frac=args.initial_train_frac,
         seed=args.seed,
         window_size=args.window_size,
     )
