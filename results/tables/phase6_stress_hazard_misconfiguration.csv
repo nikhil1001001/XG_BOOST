@@ -1,0 +1,4 @@
+config,hazard_rate,n_true_breaks,n_detected,n_missed,mean_lag,n_false_alarms,false_alarm_rate_per_1000
+too_sensitive,0.05,8,6,2,124.16666666666667,110,6.875
+well_tuned,0.0004,8,6,2,76.33333333333333,71,4.4375
+too_insensitive,2e-05,8,7,1,70.85714285714286,97,6.0625

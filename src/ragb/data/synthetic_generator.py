@@ -155,6 +155,64 @@ class SyntheticRegimeGenerator:
         )
 
 
+def generate_gradual_drift_stream(
+    n_samples: int = 8000,
+    n_features: int = 10,
+    transition_start: int | None = None,
+    transition_length: int = 3000,
+    seed: int = 42,
+    base_fraud_rate: float = 0.05,
+) -> SyntheticStream:
+    """Two generative rules (era A -> era B), but with NO discrete changepoint: the label-generating
+    weight vector is linearly interpolated from w_A to w_B over `transition_length` steps starting at
+    `transition_start` (default: stream midpoint minus half the transition), rather than switching
+    instantaneously. Used for Phase 6's gradual-drift stress test -- Section 9 names this a known weak
+    spot of changepoint-based methods generally (BOCPD has no sharp break to detect), in contrast to
+    the discrete-break generator above. `breakpoints` is returned empty (there genuinely isn't one);
+    `regime_id` is returned as -1 throughout the transition window (neither era A nor B applies
+    cleanly) so callers can identify it if needed.
+    """
+    rng = np.random.default_rng(seed)
+    if transition_start is None:
+        transition_start = n_samples // 2 - transition_length // 2
+
+    X_all = rng.normal(0.0, 1.0, size=(n_samples, n_features))
+    w_a = _draw_era_weights(rng, n_features, sparsity=0.5)
+    w_b = _draw_era_weights(rng, n_features, sparsity=0.5)
+    b_a = _fit_bias_for_target_rate(X_all, w_a, base_fraud_rate)
+    b_b = _fit_bias_for_target_rate(X_all, w_b, base_fraud_rate)
+
+    y = np.empty(n_samples, dtype=int)
+    regime_id = np.empty(n_samples, dtype=int)
+    transition_end = transition_start + transition_length
+
+    for t in range(n_samples):
+        if t < transition_start:
+            w, b, era = w_a, b_a, 0
+        elif t >= transition_end:
+            w, b, era = w_b, b_b, 1
+        else:
+            frac = (t - transition_start) / transition_length
+            w = (1 - frac) * w_a + frac * w_b
+            b = (1 - frac) * b_a + frac * b_b
+            era = -1
+        p = 1.0 / (1.0 + np.exp(-(X_all[t] @ w + b)))
+        y[t] = rng.binomial(1, p)
+        regime_id[t] = era
+
+    columns = [f"f{i}" for i in range(n_features)]
+    X_df = pd.DataFrame(X_all, columns=columns).astype("float32")
+    cfg = SyntheticStreamConfig(n_samples=n_samples, n_features=n_features, n_eras=2, seed=seed, base_fraud_rate=base_fraud_rate)
+    return SyntheticStream(
+        X=X_df,
+        y=pd.Series(y, name="label"),
+        regime_id=regime_id,
+        breakpoints=np.array([], dtype=int),  # no discrete break, by design
+        era_weights=[(w_a, b_a), (w_b, b_b)],
+        config=cfg,
+    )
+
+
 def generate_single_changepoint(
     n_samples: int = 4000,
     breakpoint_idx: int = 2000,

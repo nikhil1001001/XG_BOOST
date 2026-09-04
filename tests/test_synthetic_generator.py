@@ -3,6 +3,7 @@ import numpy as np
 from ragb.data.synthetic_generator import (
     SyntheticRegimeGenerator,
     SyntheticStreamConfig,
+    generate_gradual_drift_stream,
     generate_single_changepoint,
 )
 
@@ -53,3 +54,21 @@ def test_single_changepoint_ground_truth():
     assert list(stream.breakpoints) == [2500]
     assert set(stream.regime_id[:2500]) == {0}
     assert set(stream.regime_id[2500:]) == {1}
+
+
+def test_gradual_drift_has_no_breakpoints():
+    stream = generate_gradual_drift_stream(n_samples=4000, transition_start=1500, transition_length=1000, seed=1)
+    assert len(stream.breakpoints) == 0
+
+
+def test_gradual_drift_regime_id_marks_transition_window():
+    stream = generate_gradual_drift_stream(n_samples=4000, transition_start=1500, transition_length=1000, seed=1)
+    assert set(stream.regime_id[:1500]) == {0}
+    assert set(stream.regime_id[1500:2500]) == {-1}
+    assert set(stream.regime_id[2500:]) == {1}
+
+
+def test_gradual_drift_reproducible():
+    s1 = generate_gradual_drift_stream(n_samples=2000, seed=7)
+    s2 = generate_gradual_drift_stream(n_samples=2000, seed=7)
+    assert np.array_equal(s1.y.to_numpy(), s2.y.to_numpy())

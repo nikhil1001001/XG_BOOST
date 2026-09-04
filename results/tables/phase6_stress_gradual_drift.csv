@@ -1,0 +1,4 @@
+method,mean_pr_auc,total_boosting_rounds
+static_xgb,0.25371611997707905,100
+single_expert_RAGB,0.2695894867814347,360
+adwin_online,0.28037411268998735,150
