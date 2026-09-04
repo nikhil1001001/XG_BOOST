@@ -1,0 +1,3 @@
+method,mean_pr_auc,n_retrains,total_boosting_rounds,train_time_sec,seed
+static_xgb,0.3876278736611187,1,100,0.4256250858306885,42
+periodic_retrain,0.3981255802985646,16,1600,2.8032567501068115,42

@@ -1,0 +1,27 @@
+{
+  "seed": 42,
+  "n_samples": 20000,
+  "breakpoints": [
+    1400,
+    8090,
+    10690,
+    12037,
+    13648,
+    14568,
+    16105,
+    17912,
+    19913
+  ],
+  "config": {
+    "seed": 42,
+    "n_samples": 20000,
+    "n_features": 10,
+    "n_eras": 3,
+    "hazard_rate": 0.0006666666666666666,
+    "min_run_length": 800,
+    "initial_train_frac": 0.2,
+    "retrain_every": 1000,
+    "window_size": 500,
+    "output_dir": "C:\\Documenten\\A_Placement\\CV pointers\\PROJECT\\XG_BOOST\\results\\tables"
+  }
+}
