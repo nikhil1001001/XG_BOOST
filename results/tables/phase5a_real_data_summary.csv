@@ -1,0 +1,7 @@
+method,mean_pr_auc,n_retrains,total_boosting_rounds,train_time_sec,data_source,seed
+static_xgb,0.6788316037530344,1,100,0.30580854415893555,ulb_creditcard,42
+periodic_retrain,0.7354621727858786,26,2600,16.509560585021973,ulb_creditcard,42
+sliding_window_retrain,0.3682977325915279,26,2600,1.361220121383667,ulb_creditcard,42
+adwin_online,0.7207656924783679,11,600,1.2937002182006836,ulb_creditcard,42
+single_expert,0.6089664108708206,53,1140,2.873304843902588,ulb_creditcard,42
+mixture,0.6654391444870371,65,3460,2.962376356124878,ulb_creditcard,42

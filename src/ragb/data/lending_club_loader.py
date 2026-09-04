@@ -42,14 +42,16 @@ def load_lending_club(cache_dir: str | Path = "data/lending_club") -> tuple[pd.D
     df["issue_d"] = pd.to_datetime(df["issue_d"], format="%b-%Y", errors="coerce")
     df = df.dropna(subset=["issue_d"]).sort_values("issue_d", kind="stable").reset_index(drop=True)
 
+    # Numeric columns only: XGBoost's default (non-categorical) training path needs int/float/bool
+    # dtypes, and Lending Club's ~30 object-dtype columns are mostly high-cardinality free text
+    # (url, desc, title, emp_title, zip_code) or redundant status strings -- not worth the added
+    # complexity of categorical encoding for a fallback data source in a regime-shift benchmark
+    # where the numeric financial fields (loan amount, income, DTI, FICO range, rates, ...) already
+    # carry the bulk of the credit-risk signal. A future pass could add categorical support if this
+    # source becomes the primary real-data result rather than a fallback.
     drop_cols = {"loan_status", "label", "issue_d"}
-    feature_cols = [c for c in df.columns if c not in drop_cols]
-    X = df[feature_cols].copy()
-    for col in X.columns:
-        if X[col].dtype == "object":
-            X[col] = X[col].astype("category")
-        elif pd.api.types.is_numeric_dtype(X[col]):
-            X[col] = X[col].astype("float32")
+    feature_cols = [c for c in df.columns if c not in drop_cols and pd.api.types.is_numeric_dtype(df[c])]
+    X = df[feature_cols].astype("float32")
     y = df["label"]
 
     metadata = {

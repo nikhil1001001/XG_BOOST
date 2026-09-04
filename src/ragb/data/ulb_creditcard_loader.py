@@ -16,6 +16,13 @@ EXPECTED_N_ROWS_APPROX = 284_807
 EXPECTED_COLUMNS = {"Time", "Amount", "Class", *(f"V{i}" for i in range(1, 29))}
 
 
+def _read_cached_parquet(cache_dir: Path) -> pd.DataFrame:
+    matches = list(cache_dir.glob(f"**/dataset_{OPENML_DATASET_ID}.pq"))
+    if not matches:
+        raise FileNotFoundError(f"Could not locate cached dataset_{OPENML_DATASET_ID}.pq under {cache_dir}")
+    return pd.read_parquet(matches[0])
+
+
 def load_ulb_creditcard(cache_dir: str | Path = "data/ulb_creditcard") -> tuple[pd.DataFrame, pd.Series, dict]:
     """Downloads (or loads from OpenML's own cache) the ULB Credit Card Fraud dataset, verifies its
     schema matches what Section 0b's review flagged as needing confirmation (not just trusting the
@@ -41,7 +48,12 @@ def load_ulb_creditcard(cache_dir: str | Path = "data/ulb_creditcard") -> tuple[
             f"the loader should fall back to searching OpenML by name ('creditcard')."
         )
 
-    df, *_ = dataset.get_data(target=dataset.default_target_attribute)
+    # NOTE: openml's own `get_data()` silently drops the `Time` column -- it's registered as this
+    # dataset's `row_id_attribute` on OpenML, which get_data() always excludes from the returned
+    # frame regardless of the `target=` argument (confirmed: still missing even calling get_data()
+    # with no target at all). Since `Time` is exactly the column this loader needs for time-ordering,
+    # read the cached raw parquet file directly instead of going through get_data().
+    df = pd.read_parquet(dataset.data_file) if dataset.data_file else _read_cached_parquet(cache_dir)
     if len(df) < EXPECTED_N_ROWS_APPROX * 0.9:
         raise ValueError(f"OpenML dataset {OPENML_DATASET_ID} returned {len(df)} rows, expected ~{EXPECTED_N_ROWS_APPROX}")
 

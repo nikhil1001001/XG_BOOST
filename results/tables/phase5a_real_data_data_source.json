@@ -1,0 +1,8 @@
+{
+  "source": "ulb_creditcard",
+  "openml_dataset_id": 1597,
+  "n_rows": 284807,
+  "n_features": 30,
+  "fraud_rate": 0.001727485630620034,
+  "time_column": "Time"
+}

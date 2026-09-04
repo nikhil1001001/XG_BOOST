@@ -4,14 +4,15 @@ __pycache__/
 # NOTE: the brief's suggested pattern here (`data/synthetic/` etc. + `data/*/` + `!data/*/.gitkeep`)
 # has a real gitignore bug: excluding a directory itself makes git never traverse into it, so a
 # later `!data/*/.gitkeep` negation is silently ineffective and .gitkeep never gets tracked. Fixed
-# below by excluding directory *contents* (`data/<name>/*`) instead of the directories themselves,
-# with an explicit per-directory negation for .gitkeep. See PHASE_REPORTS/phase0_environment.md.
-data/synthetic/*
-data/ulb_creditcard/*
-data/ieee_cis/*
-!data/synthetic/.gitkeep
-!data/ulb_creditcard/.gitkeep
-!data/ieee_cis/.gitkeep
+# below by excluding directory *contents* (`data/*/*`) instead of the directories themselves, with a
+# wildcard negation for .gitkeep. See PHASE_REPORTS/phase0_environment.md. Generic across ANY
+# data/<source>/ subdirectory (not just the three named in Section 4) on purpose -- Section 6a's real-
+# data cascade added lending_club/ and elliptic/ beyond the two named example loaders, and a second
+# gitignore gap here already let a 1.67GB CSV get staged once (caught before commit, see
+# PHASE_REPORTS/phase5a_real_data_smoke_test.md) -- a generic pattern prevents a third recurrence for
+# any future data source.
+data/*/*
+!data/*/.gitkeep
 results/figures/*.png
 .ipynb_checkpoints/
 *.egg-info/

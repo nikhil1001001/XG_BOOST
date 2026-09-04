@@ -61,14 +61,13 @@ def load_ieee_cis(cache_dir: str | Path = "data/ieee_cis") -> tuple[pd.DataFrame
 
     y = df["isFraud"].astype(int)
     y.name = "label"
+    # Numeric columns only -- see the same design note in lending_club_loader.py: keeps this pipeline
+    # consistent across real-data sources without threading `enable_categorical` through every
+    # XGBoost call site for a source that (per Section 0c) is expected to be unreachable in this
+    # environment anyway.
     drop_cols = {"isFraud", "TransactionID"}
-    feature_cols = [c for c in df.columns if c not in drop_cols]
-    X = df[feature_cols].copy()
-    for col in X.columns:
-        if X[col].dtype == "object":
-            X[col] = X[col].astype("category")
-        elif pd.api.types.is_numeric_dtype(X[col]):
-            X[col] = X[col].astype("float32")
+    feature_cols = [c for c in df.columns if c not in drop_cols and pd.api.types.is_numeric_dtype(df[c])]
+    X = df[feature_cols].astype("float32")
 
     metadata = {
         "source": "ieee_cis",
