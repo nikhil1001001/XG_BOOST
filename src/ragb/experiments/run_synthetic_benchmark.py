@@ -12,35 +12,126 @@ import json
 import time
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from ragb.baselines.periodic_retrain import run_periodic_retrain
 from ragb.baselines.static_xgb import run_static_xgb
-from ragb.data.synthetic_generator import SyntheticRegimeGenerator, SyntheticStreamConfig
+from ragb.bocpd.detector import run_bocpd_on_signal
+from ragb.bocpd.signals import binary_log_loss, rolling_mean
+from ragb.data.synthetic_generator import SyntheticRegimeGenerator, SyntheticStream, SyntheticStreamConfig
+from ragb.eval.metrics import detect_events_from_probability_trace, detection_lag_and_false_alarms
 from ragb.utils.logging_config import get_logger, setup_logging
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+logger = get_logger(__name__)
+
+
+def run_bocpd_validation(
+    stream: SyntheticStream,
+    static_scores: np.ndarray,
+    split: int,
+    hazard_rates: list[float],
+    smoothing_window: int = 20,
+    break_window: int = 15,
+    event_threshold: float = 0.3,
+    max_lag: int = 300,
+    output_dir: Path | None = None,
+) -> pd.DataFrame:
+    """Phase 2: validates BOCPD on the residual-loss signal (Section 3 point 1) computed from the
+    already-trained static_xgb classifier's predictions past its training cutoff, against the
+    synthetic generator's known ground-truth breakpoints. Sweeps hazard_rate to characterize the
+    detection-lag / false-alarm-rate tradeoff (Section 8, Phase 2 acceptance criteria) rather than
+    reporting one cherry-picked operating point.
+    """
+    y_eval = stream.y.iloc[split:].to_numpy()
+    scores_eval = static_scores[split:]
+    residual_loss = binary_log_loss(y_eval, scores_eval)
+    smoothed = rolling_mean(residual_loss, smoothing_window)
+
+    # Only breakpoints after the classifier's training cutoff are detectable from this signal (the
+    # classifier has no residual-loss signal to react to before it starts scoring).
+    true_breaks_eval = np.array([bp - split for bp in stream.breakpoints if bp > split])
+    logger.info(
+        "BOCPD validation: %d evaluable breakpoints (of %d total), smoothing_window=%d, break_window=%d, event_threshold=%.2f",
+        len(true_breaks_eval), len(stream.breakpoints), smoothing_window, break_window, event_threshold,
+    )
+
+    rows = []
+    for hazard_rate in hazard_rates:
+        result = run_bocpd_on_signal(smoothed, hazard_rate=hazard_rate, break_window=break_window)
+        events = detect_events_from_probability_trace(result["post_break_weight"], threshold=event_threshold)
+        m = detection_lag_and_false_alarms(true_breaks_eval, events, max_lag=max_lag, n_timesteps=len(smoothed))
+        m["hazard_rate"] = hazard_rate
+        rows.append(m)
+        logger.info(
+            "hazard_rate=%.5f: detected=%d/%d missed=%d mean_lag=%.1f false_alarms=%d (rate/1000=%.3f)",
+            hazard_rate, m["n_detected"], m["n_true_breaks"], m["n_missed"],
+            m["mean_lag"], m["n_false_alarms"], m["false_alarm_rate_per_1000"],
+        )
+
+    sweep_df = pd.DataFrame(rows)[[
+        "hazard_rate", "n_true_breaks", "n_detected", "n_missed",
+        "mean_lag", "n_false_alarms", "false_alarm_rate_per_1000",
+    ]]
+
+    if output_dir is not None:
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+        axes[0].plot(sweep_df["hazard_rate"], sweep_df["mean_lag"], marker="o")
+        axes[0].set_xscale("log")
+        axes[0].set_xlabel("hazard_rate")
+        axes[0].set_ylabel("mean detection lag (timesteps)")
+        axes[0].set_title("Detection lag vs. hazard rate")
+
+        axes[1].plot(sweep_df["hazard_rate"], sweep_df["false_alarm_rate_per_1000"], marker="o", color="tab:red")
+        axes[1].set_xscale("log")
+        axes[1].set_xlabel("hazard_rate")
+        axes[1].set_ylabel("false alarms per 1000 steps")
+        axes[1].set_title("False-alarm rate vs. hazard rate")
+
+        fig.tight_layout()
+        fig_path = Path(output_dir) / "phase2_hazard_sweep.png"
+        fig.savefig(fig_path, dpi=120)
+        plt.close(fig)
+        logger.info("Wrote hazard-sweep figure: %s", fig_path)
+
+    return sweep_df
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Phase 1: synthetic benchmark, static_xgb + periodic_retrain baselines")
+    p = argparse.ArgumentParser(
+        description="Synthetic benchmark: Phase 1 baselines (static_xgb, periodic_retrain) "
+                     "+ Phase 2 BOCPD hazard-rate sweep validation"
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--n-samples", type=int, default=20_000)
     p.add_argument("--n-features", type=int, default=10)
     p.add_argument("--n-eras", type=int, default=3)
-    p.add_argument("--hazard-rate", type=float, default=1.0 / 1500.0)
+    p.add_argument("--hazard-rate", type=float, default=1.0 / 1500.0, help="generator's own switch hazard rate")
     p.add_argument("--min-run-length", type=int, default=800)
     p.add_argument("--initial-train-frac", type=float, default=0.2)
     p.add_argument("--retrain-every", type=int, default=1000)
     p.add_argument("--window-size", type=int, default=500)
     p.add_argument("--output-dir", type=str, default=str(REPO_ROOT / "results" / "tables"))
+    p.add_argument(
+        "--bocpd-hazard-sweep", type=float, nargs="+",
+        default=[1 / 100, 1 / 250, 1 / 500, 1 / 1000, 1 / 2500, 1 / 5000],
+        help="BOCPD detector hazard rates to sweep in Phase 2 validation (independent of the generator's own hazard rate)",
+    )
+    p.add_argument("--bocpd-smoothing-window", type=int, default=20)
+    p.add_argument("--bocpd-break-window", type=int, default=15)
+    p.add_argument("--bocpd-event-threshold", type=float, default=0.3)
+    p.add_argument("--bocpd-max-lag", type=int, default=300)
+    p.add_argument("--skip-bocpd", action="store_true", help="skip Phase 2 BOCPD validation, run Phase 1 baselines only")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     log_path = setup_logging("phase1_synthetic_baselines")
-    logger = get_logger(__name__)
 
     run_start = time.time()
     logger.info("=== Phase 1 synthetic benchmark run starting ===")
@@ -117,6 +208,38 @@ def main() -> None:
 
     duration = time.time() - run_start
     logger.info("=== Phase 1 synthetic benchmark run complete in %.2fs ===", duration)
+
+    if args.skip_bocpd:
+        return
+
+    bocpd_log_path = setup_logging("phase2_bocpd_hazard_sweep")
+    bocpd_start = time.time()
+    logger.info("=== Phase 2 BOCPD hazard-rate sweep validation starting ===")
+    logger.info("Log file: %s", bocpd_log_path)
+    logger.info(
+        "Using residual-loss signal from the already-trained static_xgb classifier "
+        "(same run as above, seed=%d, %d ground-truth breakpoints)", args.seed, len(stream.breakpoints),
+    )
+
+    split = int(args.n_samples * args.initial_train_frac)
+    sweep_df = run_bocpd_validation(
+        stream=stream,
+        static_scores=results["static_xgb"]["scores"],
+        split=split,
+        hazard_rates=args.bocpd_hazard_sweep,
+        smoothing_window=args.bocpd_smoothing_window,
+        break_window=args.bocpd_break_window,
+        event_threshold=args.bocpd_event_threshold,
+        max_lag=args.bocpd_max_lag,
+        output_dir=REPO_ROOT / "results" / "figures",
+    )
+    sweep_df["seed"] = args.seed
+    sweep_path = output_dir / "phase2_bocpd_hazard_sweep.csv"
+    sweep_df.to_csv(sweep_path, index=False)
+    logger.info("Wrote BOCPD hazard-sweep table: %s\n%s", sweep_path, sweep_df.to_string(index=False))
+
+    bocpd_duration = time.time() - bocpd_start
+    logger.info("=== Phase 2 BOCPD hazard-rate sweep validation complete in %.2fs ===", bocpd_duration)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,19 @@
     "initial_train_frac": 0.2,
     "retrain_every": 1000,
     "window_size": 500,
-    "output_dir": "C:\\Documenten\\A_Placement\\CV pointers\\PROJECT\\XG_BOOST\\results\\tables"
+    "output_dir": "C:\\Documenten\\A_Placement\\CV pointers\\PROJECT\\XG_BOOST\\results\\tables",
+    "bocpd_hazard_sweep": [
+      0.01,
+      0.004,
+      0.002,
+      0.001,
+      0.0004,
+      0.0002
+    ],
+    "bocpd_smoothing_window": 20,
+    "bocpd_break_window": 15,
+    "bocpd_event_threshold": 0.3,
+    "bocpd_max_lag": 300,
+    "skip_bocpd": false
   }
 }
